@@ -10,6 +10,7 @@ import scalafx.geometry._
 import scalafx.scene.Scene
 import scalafx.scene.control._
 import scalafx.scene.chart._
+import scalafx.scene.input._
 import scalafx.scene.layout._
 import scalafx.scene.paint.Color._
 
@@ -39,7 +40,7 @@ object Main extends JFXApp {
         disable = true
 
         onAction = handle {
-            appendTerminalText(terminalArea.text.value)
+            appendTerminalText(commandInput.text.value)
 
             //TODO: serialPort ! SerialPort.SendCommand(terminalArea.text.value)
         }
@@ -101,6 +102,7 @@ object Main extends JFXApp {
                     fill = LightGray
                     padding = Insets(5)
 
+                    top = createMenuBar()
                     center = lineChart
                     bottom = createBottomPane()
                     right = createRightPane()
@@ -108,8 +110,32 @@ object Main extends JFXApp {
             }
 
             onCloseRequest = handle {
-                system.terminate()
+                closeApp()
             }
+        }
+    }
+
+    private def createMenuBar(): MenuBar = {
+        val menu = new Menu("File") {
+            items = List(
+                new MenuItem("Clear terminal") {
+                    accelerator = new KeyCodeCombination(KeyCode.L, KeyCombination.MetaDown)
+                    onAction = handle {
+                        terminalArea.clear()
+                    }
+                },
+                new MenuItem("Close") {
+                    onAction = handle {
+                        stage.close()
+                        closeApp()
+                    }
+                }
+            )
+        }
+
+        new MenuBar {
+            useSystemMenuBar = true
+            menus.add(menu)
         }
     }
 
@@ -198,6 +224,14 @@ object Main extends JFXApp {
     }
 
     private def appendTerminalText(message: String): Unit = {
-        terminalArea.text.value = terminalArea.text.value + "\n" + message
+        if (terminalArea.text.value.nonEmpty) {
+            terminalArea.appendText("\n")
+        }
+
+        terminalArea.appendText(message)
+    }
+
+    private def closeApp(): Unit = {
+        system.terminate()
     }
 }
