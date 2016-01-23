@@ -23,11 +23,6 @@ object Main extends JFXApp {
     private val system = ActorSystem()
     private val serialPort = system.actorOf(SerialPort.props)
 
-    private val measuredProfileSeries = new XYChart.Series[Number, Number] {
-        name = "Measured"
-        data = Seq.empty
-    }
-
     // global UI widgets
     private val terminalArea = new TextArea {
         editable = false
@@ -46,7 +41,7 @@ object Main extends JFXApp {
         onAction = handle {
             appendTerminalText(terminalArea.text.value)
 
-            serialPort ! SerialPort.SendCommand(terminalArea.text.value)
+            //TODO: serialPort ! SerialPort.SendCommand(terminalArea.text.value)
         }
     }
 
@@ -60,6 +55,8 @@ object Main extends JFXApp {
     }
     connectButton.requestFocus()
 
+    val lineChart = createLineChart()
+
     // main UI
     stage = createStage()
 
@@ -71,7 +68,7 @@ object Main extends JFXApp {
                         // do nothing
                     }
                     else {
-                        appendTerminalText("Successfully connected")
+                        appendTerminalText(msg.message)
                     }
                 }
                 case msg: SerialPort.ConnectionClosed => {
@@ -89,9 +86,7 @@ object Main extends JFXApp {
                     commandInput.disable = false
                 }
                 case msg: SerialPort.DataReceived => {
-                    measuredProfileSeries.getData.add(XYChart.Data[Number, Number](msg.time, msg.temperature))
-                    //val xSeries = lineChart.data.get().get(0)
-                    //xSeries.getData.add(XYChart.Data[Number, Number](newValue, newValue))
+                    lineChart.getData.get(1).getData.add(XYChart.Data[Number, Number](msg.time, msg.temperature))
                 }
             }
         }
@@ -106,7 +101,7 @@ object Main extends JFXApp {
                     fill = LightGray
                     padding = Insets(5)
 
-                    center = createLineChart()
+                    center = lineChart
                     bottom = createBottomPane()
                     right = createRightPane()
                 }
@@ -137,7 +132,13 @@ object Main extends JFXApp {
             ).map(toChartData)
         }
 
-        val lineChart = new LineChart[Number, Number](timeAxis, temperatureAxis, ObservableBuffer(referenceProfileSeries))
+        val measuredProfileSeries = new XYChart.Series[Number, Number] {
+            name = "Measured"
+            data = Seq.empty
+        }
+
+        val lineChart = new LineChart[Number, Number](timeAxis, temperatureAxis, ObservableBuffer(
+            referenceProfileSeries, measuredProfileSeries))
         lineChart.setAnimated(false)
         lineChart.setCreateSymbols(false)
 
