@@ -62,33 +62,7 @@ class SerialPort extends Actor with ActorLogging {
             operator ! Serial.Write(msg.command)
         }
         case msg: Serial.Received => {
-            val array = msg.data.toArray
-
-            if (array.length < 4) {
-                Communication.messageFromSerial.onNext(Information(s"""Received bytes array should at least contains 4 bytes."""))
-            }
-            else {
-                val codeLsb = 0xFF & array(3)
-                val codeMsb = 0xFF & array(4)
-                val code = (codeLsb << 8) | codeMsb
-
-                code match {
-                    case 0xA100 => {
-                        if (array.length == 12) {
-                            val desiredTemperature = extractFloat(array.drop(4).dropRight(4))
-                            val measuredTemperature = extractFloat(array.drop(8))
-
-                            log.info(s"""desiredTemperature: $desiredTemperature, measuredTemperature: $measuredTemperature""")
-                        }
-                        else {
-                            Communication.messageFromSerial.onNext(Information(s"""Unexpected length "${array.length}" for code 0xA100."""))
-                        }
-                    }
-                    case _ => {
-                        Communication.messageFromSerial.onNext(Information(s"""Unknown code received: 0x${Integer.toHexString(code).capitalize}."""))
-                    }
-                }
-            }
+            handleData(msg)
         }
         case Serial.Closed => {
             Communication.messageFromSerial.onNext(ConnectionClosed("Serial operator closed normally"))
@@ -103,6 +77,34 @@ class SerialPort extends Actor with ActorLogging {
 
             cancelScheduler()
             context.become(waitForOpen)
+        }
+    }
+
+    private def handleData(msg: Serial.Received): Unit = {
+        val bytes = msg.data.toArray
+
+        if (bytes.length < 4) {
+            Communication.messageFromSerial.onNext(Information(s"""Received bytes array should at least contains 4 bytes."""))
+        }
+        else {
+            val code = 0xFFFF & extractValue(bytes.slice(2, 4)).getShort
+
+            code match {
+                case 0xA100 => {
+                    if (bytes.length == 12) {
+                        //val desiredTemperature = extractFloat(array.drop(4).dropRight(4))
+                        val measuredTemperature = extractFloat(bytes.drop(8))
+
+                        Communication.messageFromSerial.onNext(DataReceived(0/*TODO*/, measuredTemperature))
+                    }
+                    else {
+                        Communication.messageFromSerial.onNext(Information(s"""Unexpected length "${bytes.length}" for code 0xA100."""))
+                    }
+                }
+                case _ => {
+                    Communication.messageFromSerial.onNext(Information(s"""Unknown code received: 0x${Integer.toHexString(code).capitalize}."""))
+                }
+            }
         }
     }
 
