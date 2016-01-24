@@ -58,6 +58,9 @@ class SerialPort extends Actor with ActorLogging {
     }
 
     private def waitForCommunication(operator: ActorRef): Receive = {
+        case msg: Close => {
+            operator ! Serial.Close
+        }
         case msg: SendCommand => {
             operator ! Serial.Write(msg.command)
         }
@@ -123,8 +126,8 @@ class SerialPort extends Actor with ActorLogging {
 object SerialPort {
     // input messages
     case class Open(port: String, settings: SerialSettings)
-
     case class SendCommand(command: ByteString)
+    case class Close()
 
     // output messages
     sealed trait OutputMessage

@@ -76,6 +76,11 @@ object Main extends JFXApp {
                     appendTerminalText(msg.message)
 
                     connectButton.disable = false
+                    connectButton.text = "Connect"
+                    connectButton.onAction = handle {
+                        onConnectHandle()
+                    }
+
                     commandInput.disable = false
                     portTextField.disable = false
 
@@ -85,6 +90,12 @@ object Main extends JFXApp {
                     appendTerminalText("Successfully connected")
 
                     commandInput.disable = false
+
+                    connectButton.disable = false
+                    connectButton.text = "Disconnect"
+                    connectButton.onAction = handle {
+                        onDisconnectHandle()
+                    }
                 }
                 case msg: SerialPort.DataReceived => {
                     lineChart.getData.get(1).getData.add(XYChart.Data[Number, Number](msg.time, msg.temperature))
@@ -190,11 +201,7 @@ object Main extends JFXApp {
         GridPane.setConstraints(portTextField, 1, 0, 1, 1)
 
         connectButton.onAction = handle {
-            portTextField.disable = true
-            connectButton.disable = true
-
-            val settings = SerialSettings(115200, 8, twoStopBits = false, Parity.None)
-            serialPort ! SerialPort.Open(portTextField.text.value, settings)
+            onConnectHandle()
         }
         GridPane.setConstraints(connectButton, 1, 1, 1, 1)
 
@@ -233,5 +240,19 @@ object Main extends JFXApp {
 
     private def closeApp(): Unit = {
         system.terminate()
+    }
+
+    private def onConnectHandle(): Unit = {
+        portTextField.disable = true
+
+        connectButton.disable = true
+        connectButton.text = "Connecting..."
+
+        val settings = SerialSettings(115200, 8, twoStopBits = false, Parity.None)
+        serialPort ! SerialPort.Open(portTextField.text.value, settings)
+    }
+
+    private def onDisconnectHandle(): Unit = {
+        serialPort ! SerialPort.Close()
     }
 }
