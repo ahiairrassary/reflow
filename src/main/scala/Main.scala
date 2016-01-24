@@ -23,6 +23,9 @@ object Communication {
 object Main extends JFXApp {
     private val system = ActorSystem()
     private val serialPort = system.actorOf(SerialPort.props)
+    system.actorOf(SerialWatcher.props)
+
+    private val availablePortsPath = ObservableBuffer.empty[String]
 
     // global UI widgets
     private val terminalArea = new TextArea {
@@ -46,15 +49,16 @@ object Main extends JFXApp {
         }
     }
 
-    private val portTextField = new TextField {
-        text = "/dev/ttyUSB0"
-        alignmentInParent = Pos.BaselineRight
-    }
-
     private val connectButton = new Button {
         text = "Connect"
     }
     connectButton.requestFocus()
+
+    private val availablePortsChoiceBox = new ChoiceBox[String] {
+        maxWidth = 200
+        alignmentInParent = Pos.BaselineRight
+        items = availablePortsPath
+    }
 
     val lineChart = createLineChart()
 
@@ -72,6 +76,9 @@ object Main extends JFXApp {
                         appendTerminalText(msg.message)
                     }
                 }
+                case msg: SerialPort.Error => {
+                    appendTerminalText(msg.message)
+                }
                 case msg: SerialPort.ConnectionClosed => {
                     appendTerminalText(msg.message)
 
@@ -82,7 +89,7 @@ object Main extends JFXApp {
                     }
 
                     commandInput.disable = false
-                    portTextField.disable = false
+                    availablePortsChoiceBox.disable = false
 
                     commandInput.disable = true
                 }
@@ -99,6 +106,16 @@ object Main extends JFXApp {
                 }
                 case msg: SerialPort.DataReceived => {
                     lineChart.getData.get(1).getData.add(XYChart.Data[Number, Number](msg.time, msg.temperature))
+                }
+                case msg: SerialPort.NewSerialPort => {
+                    availablePortsPath.clear()
+                    (availablePortsPath ++ Some(msg.path)).distinct.sorted.foreach { path =>
+                        availablePortsPath += path
+                    }
+
+                    if (availablePortsPath.length == 1) {
+                        availablePortsChoiceBox.selectionModel.value.selectLast()
+                    }
                 }
             }
         }
@@ -192,13 +209,12 @@ object Main extends JFXApp {
     }
 
     private def createConnectionPane(): Pane = {
-        val portLabel = new Label("Name:") {
+        val portLabel = new Label("Port:") {
             alignmentInParent = Pos.BaselineRight
         }
         GridPane.setConstraints(portLabel, 0, 0, 1, 1)
 
-
-        GridPane.setConstraints(portTextField, 1, 0, 1, 1)
+        GridPane.setConstraints(availablePortsChoiceBox, 1, 0, 1, 1)
 
         connectButton.onAction = handle {
             onConnectHandle()
@@ -206,8 +222,9 @@ object Main extends JFXApp {
         GridPane.setConstraints(connectButton, 1, 1, 1, 1)
 
         new GridPane {
-            hgap = 4
-            children ++= Seq(portLabel, portTextField, connectButton)
+            hgap = 5
+            vgap = 5
+            children ++= Seq(portLabel, availablePortsChoiceBox, connectButton)
         }
     }
 
@@ -243,13 +260,13 @@ object Main extends JFXApp {
     }
 
     private def onConnectHandle(): Unit = {
-        portTextField.disable = true
+        availablePortsChoiceBox.disable = true
 
         connectButton.disable = true
         connectButton.text = "Connecting..."
 
         val settings = SerialSettings(115200, 8, twoStopBits = false, Parity.None)
-        serialPort ! SerialPort.Open(portTextField.text.value, settings)
+        serialPort ! SerialPort.Open(availablePortsChoiceBox.getSelectionModel.getSelectedItem, settings)
     }
 
     private def onDisconnectHandle(): Unit = {

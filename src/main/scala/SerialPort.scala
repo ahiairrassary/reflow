@@ -7,7 +7,7 @@ import com.github.jodersky.flow._
 
 import scala.concurrent.duration._
 
-class SerialPort extends Actor with ActorLogging {
+class SerialPort extends Actor {
     import SerialPort._
 
     private implicit val system = context.system
@@ -131,6 +131,8 @@ object SerialPort {
 
     // output messages
     sealed trait OutputMessage
+    case class NewSerialPort(path: String) extends OutputMessage
+    case class Error(message: String) extends OutputMessage
     case class Information(message: String) extends OutputMessage
     case class ConnectionClosed(message: String) extends OutputMessage
     case class ConnectionSuccess() extends OutputMessage
