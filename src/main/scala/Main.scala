@@ -10,7 +10,7 @@ import scalafx.application.JFXApp.PrimaryStage
 import scalafx.application._
 import scalafx.collections.ObservableBuffer
 import scalafx.geometry._
-import scalafx.scene.Scene
+import scalafx.scene.{Node, Scene}
 import scalafx.scene.control._
 import scalafx.scene.chart._
 import scalafx.scene.input._
@@ -305,13 +305,19 @@ object Main extends JFXApp {
             )
         }
 
-        val pidValues = new VBox {
-            spacing = 5
-            children = Seq(
-                createPidSpinBox("P", 10),
-                createPidSpinBox("I", 20),
-                createPidSpinBox("D", 30)
-            )
+        val pidSpinners = Seq(
+            ("P", 10),
+            ("I", 20),
+            ("D", 30)
+        ).zipWithIndex.flatMap { case ((name, initialValue), index) =>
+            createPidSpinBox(name, initialValue, index)
+        }
+
+        val pidValues = new GridPane {
+            hgap = 5
+            vgap = 5
+            alignmentInParent = Pos.BaselineRight
+            children = pidSpinners
         }
 
         new VBox {
@@ -320,7 +326,7 @@ object Main extends JFXApp {
         }
     }
 
-    private def createPidSpinBox(name: String, initialValue: Float): HBox = {
+    private def createPidSpinBox(name: String, initialValue: Float, rowIndex: Int): Seq[Node] = {
         val label = new Label {
             style = "-fx-font-weight: bold"
             text = s"$name: "
@@ -336,10 +342,10 @@ object Main extends JFXApp {
             })
         }
 
-        new HBox {
-            spacing = 5
-            children = Seq(label, spinBox)
-        }
+        GridPane.setConstraints(label, 0, rowIndex, 1, 1)
+        GridPane.setConstraints(spinBox, 1, rowIndex, 1, 1)
+
+        Seq(label, spinBox)
     }
 
     private def createBottomPane(): Pane = {
