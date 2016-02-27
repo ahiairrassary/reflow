@@ -33,7 +33,7 @@ class SerialPortActor extends Actor with SerialPortEventListener{
             context.become(waitForConnection)
 
             Try {
-                port = new SerialPort(msg.port)
+                port = new SerialPort(msg.portName)
                 port.openPort()
                 port.setParams(SerialPort.BAUDRATE_115200, SerialPort.DATABITS_8, SerialPort.STOPBITS_1, SerialPort.PARITY_NONE)
                 port.setEventsMask(SerialPort.MASK_RXCHAR)
@@ -164,7 +164,7 @@ class SerialPortActor extends Actor with SerialPortEventListener{
 
 object SerialPortActor {
     // input messages
-    case class Open(port: String)
+    case class Open(portName: String)
     case class SendCommand(command: ByteString)
     case class Close()
 

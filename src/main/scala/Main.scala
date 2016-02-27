@@ -380,12 +380,19 @@ object Main extends JFXApp {
     }
 
     private def onConnectHandle(): Unit = {
-        availablePortsChoiceBox.disable = true
+        Option(availablePortsChoiceBox.getSelectionModel.getSelectedItem) match {
+            case Some(portName) => {
+                availablePortsChoiceBox.disable = true
 
-        connectButton.disable = true
-        connectButton.text = "Connecting..."
+                connectButton.disable = true
+                connectButton.text = "Connecting..."
 
-        serialPort ! SerialPortActor.Open(availablePortsChoiceBox.getSelectionModel.getSelectedItem)
+                serialPort ! SerialPortActor.Open(portName)
+            }
+            case _ => {
+                appendTerminalText("Error: please select a port before connecting")
+            }
+        }
     }
 
     private def onDisconnectHandle(): Unit = {
