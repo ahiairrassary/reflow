@@ -13,9 +13,14 @@ class SerialPort extends Actor {
     private implicit val system = context.system
     private implicit val dispatcher = system.dispatcher
 
-    private var askTemperatureSchedulerOpt: Option[Cancellable] = None
+    private var timeoutSchedulerOpt = Option.empty[Cancellable]
+    private var readBuffer = ByteString.empty
 
     def receive = waitForOpen
+
+    override def postStop(): Unit = {
+        timeoutSchedulerOpt.foreach(_.cancel())
+    }
 
     private def waitForOpen: Receive = {
         case msg: Open => {
@@ -39,7 +44,6 @@ class SerialPort extends Actor {
             }
 
             Communication.messageFromSerial.onNext(ConnectionClosed(reason))
-            cancelScheduler()
             context.become(waitForOpen)
         }
         case msg: Serial.Opened => {
@@ -48,9 +52,6 @@ class SerialPort extends Actor {
             val operator = sender
             context.become(waitForCommunication(operator))
             context.watch(operator)
-
-            val command = ByteString(0x02, 0x00, 0x00, 0xA0)
-            askTemperatureSchedulerOpt = Some(system.scheduler.schedule(0.second, 1.second, self, SendCommand(command)))
         }
         case msg: SendCommand => {
             // do nothing
@@ -70,56 +71,48 @@ class SerialPort extends Actor {
         case Serial.Closed => {
             Communication.messageFromSerial.onNext(ConnectionClosed("Serial operator closed normally"))
 
-            cancelScheduler()
             context.unwatch(operator)
             context.become(waitForOpen)
         }
+        case ReadTimeout => {
+            timeoutSchedulerOpt.foreach(_.cancel())
+            timeoutSchedulerOpt = None
 
+            readBuffer = ByteString.empty
+            println("Read timeout") // TODO
+        }
         case Terminated(`operator`) => {
             Communication.messageFromSerial.onNext(ConnectionClosed("Serial operator crashed"))
 
-            cancelScheduler()
             context.become(waitForOpen)
         }
     }
 
     private def handleData(msg: Serial.Received): Unit = {
-        val bytes = msg.data.toArray
+        readBuffer ++= msg.data
 
-        if (bytes.length < 4) {
-            Communication.messageFromSerial.onNext(Information(s"""Received bytes array should at least contains 4 bytes."""))
-        }
-        else {
-            val code = 0xFFFF & extractValue(bytes.slice(2, 4)).getShort
+        val bytes = readBuffer.toArray
 
-            code match {
-                case 0xA100 => {
-                    if (bytes.length == 12) {
-                        //val desiredTemperature = extractFloat(array.drop(4).dropRight(4))
-                        val measuredTemperature = extractFloat(bytes.drop(8))
+        if (bytes.length >= 2) {
+            timeoutSchedulerOpt.foreach(_.cancel())
+            timeoutSchedulerOpt = None
 
-                        Communication.messageFromSerial.onNext(DataReceived(0/*TODO*/, measuredTemperature))
-                    }
-                    else {
-                        Communication.messageFromSerial.onNext(Information(s"""Unexpected length "${bytes.length}" for code 0xA100."""))
-                    }
-                }
-                case _ => {
-                    Communication.messageFromSerial.onNext(Information(s"""Unknown code received: 0x${Integer.toHexString(code).capitalize}."""))
-                }
+            val expectedLength = 0xFFFF & extractValue(bytes.take(2)).getShort + 2
+
+            if (bytes.length >= expectedLength) {
+                val command = bytes.take(expectedLength)
+                readBuffer = readBuffer.drop(expectedLength)
+
+                Communication.messageFromSerial.onNext(DataReceived(ByteString(command)))
+            }
+            else {
+                timeoutSchedulerOpt.foreach(_.cancel())
+                timeoutSchedulerOpt = Some(system.scheduler.scheduleOnce(500.milliseconds, self, ReadTimeout))
             }
         }
-    }
-
-    private def cancelScheduler(): Unit = {
-        askTemperatureSchedulerOpt.foreach(_.cancel())
-    }
-
-    private def extractFloat(bytes: Array[Byte]): Float = {
-        extractValue(bytes).getFloat
-    }
-    private def extractValue(bytes: Array[Byte]): ByteBuffer = {
-        ByteBuffer.wrap(bytes).order(ByteOrder.LITTLE_ENDIAN)
+        else {
+            // do nothing
+        }
     }
 }
 
@@ -129,6 +122,9 @@ object SerialPort {
     case class SendCommand(command: ByteString)
     case class Close()
 
+    val startCommand = SendCommand(ByteString(0x02, 0x00, 0x00, 0xB0))
+    val stopCommand = SendCommand(ByteString(0x02, 0x00, 0x01, 0xB0))
+
     // output messages
     sealed trait OutputMessage
     case class NewSerialPort(path: String) extends OutputMessage
@@ -136,8 +132,18 @@ object SerialPort {
     case class Information(message: String) extends OutputMessage
     case class ConnectionClosed(message: String) extends OutputMessage
     case class ConnectionSuccess() extends OutputMessage
-    case class DataReceived(time: Double, temperature: Double) extends OutputMessage
+    case class DataReceived(data: ByteString) extends OutputMessage
+
+    // private messages
+    case class ReadTimeout()
 
     // functions
     def props = Props[SerialPort]
+
+    def extractFloat(bytes: Array[Byte]): Float = {
+        extractValue(bytes).getFloat
+    }
+    def extractValue(bytes: Array[Byte]): ByteBuffer = {
+        ByteBuffer.wrap(bytes).order(ByteOrder.LITTLE_ENDIAN)
+    }
 }

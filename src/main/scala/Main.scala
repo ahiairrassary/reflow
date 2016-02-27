@@ -1,5 +1,10 @@
+import java.nio.charset._
+
 import akka.actor.ActorSystem
+import akka.util.ByteString
 import com.github.jodersky.flow._
+import org.apache.commons.codec.binary.Hex
+import org.apache.commons.lang3.CharUtils
 import rx.lang.scala._
 import rx.lang.scala.subjects._
 import scalafx.Includes._
@@ -50,9 +55,25 @@ object Main extends JFXApp {
     }
 
     private val connectButton = new Button {
+        alignmentInParent = Pos.BaselineLeft
         text = "Connect"
     }
     connectButton.requestFocus()
+
+    private val startStopButton = new Button {
+        text = "Start"
+        onAction = handle {
+            if (text.value == "Start") {
+                cleanReceivedSeries()
+                serialPort ! SerialPort.startCommand
+                text = "Stop"
+            }
+            else {
+                serialPort ! SerialPort.stopCommand
+                text = "Start"
+            }
+        }
+    }
 
     private val availablePortsChoiceBox = new ChoiceBox[String] {
         maxWidth = 200
@@ -60,10 +81,41 @@ object Main extends JFXApp {
         items = availablePortsPath
     }
 
-    val lineChart = createLineChart()
+    private val desiredTemperatureValueLabel = new Label {
+        text = "-"
+    }
+
+    private val measuredTemperatureValueLabel = new Label {
+        text = "-"
+    }
+
+    private val controlPane = createControlPane()
+    controlPane.disable = true
+
+    private val lineChart = createLineChart()
+
+    private def referenceProfileSeries(): XYChart.Series[Number, Number] = {
+        lineChart.getData.get(0)
+    }
+
+    private def desiredProfileSeries(): XYChart.Series[Number, Number] = {
+        lineChart.getData.get(1)
+    }
+
+    private def measuredProfileSeries(): XYChart.Series[Number, Number] = {
+        lineChart.getData.get(2)
+    }
+
+    private def cleanReceivedSeries(): Unit = {
+        desiredProfileSeries().getData.clear()
+        measuredProfileSeries().getData.clear()
+    }
 
     // main UI
     stage = createStage()
+
+    // TODO
+    referenceProfileSeries().node.value.style = "-fx-stroke-width: 1; -fx-stroke: #808080; -fx-stroke-dash-array: 5 10;"
 
     Communication.messageFromSerial.subscribe { message =>
         Platform.runLater {
@@ -82,6 +134,8 @@ object Main extends JFXApp {
                 case msg: SerialPort.ConnectionClosed => {
                     appendTerminalText(msg.message)
 
+                    startStopButton.text = "Start"
+
                     connectButton.disable = false
                     connectButton.text = "Connect"
                     connectButton.onAction = handle {
@@ -92,6 +146,11 @@ object Main extends JFXApp {
                     availablePortsChoiceBox.disable = false
 
                     commandInput.disable = true
+                    controlPane.disable = true
+                    desiredTemperatureValueLabel.text = "-"
+                    measuredTemperatureValueLabel.text = "-"
+
+                    cleanReceivedSeries()
                 }
                 case msg: SerialPort.ConnectionSuccess => {
                     appendTerminalText("Successfully connected")
@@ -103,9 +162,11 @@ object Main extends JFXApp {
                     connectButton.onAction = handle {
                         onDisconnectHandle()
                     }
+
+                    controlPane.disable = false
                 }
                 case msg: SerialPort.DataReceived => {
-                    lineChart.getData.get(1).getData.add(XYChart.Data[Number, Number](msg.time, msg.temperature))
+                    processData(msg.data)
                 }
                 case msg: SerialPort.NewSerialPort => {
                     availablePortsPath.clear()
@@ -173,7 +234,7 @@ object Main extends JFXApp {
 
         val toChartData = (xy: (Double, Double)) => XYChart.Data[Number, Number](xy._1, xy._2)
 
-        val referenceProfileSeries = new XYChart.Series[Number, Number] {
+        val referenceProfile = new XYChart.Series[Number, Number] {
             name = "Reference"
             data = Seq(
                 (0.0, 25.0),
@@ -186,13 +247,18 @@ object Main extends JFXApp {
             ).map(toChartData)
         }
 
-        val measuredProfileSeries = new XYChart.Series[Number, Number] {
+        val desiredProfile = new XYChart.Series[Number, Number] {
+            name = "Desired"
+            data = Seq.empty
+        }
+
+        val measuredProfile = new XYChart.Series[Number, Number] {
             name = "Measured"
             data = Seq.empty
         }
 
         val lineChart = new LineChart[Number, Number](timeAxis, temperatureAxis, ObservableBuffer(
-            referenceProfileSeries, measuredProfileSeries))
+            referenceProfile, desiredProfile, measuredProfile))
         lineChart.setAnimated(false)
         lineChart.setCreateSymbols(false)
 
@@ -201,9 +267,11 @@ object Main extends JFXApp {
 
     private def createRightPane(): Pane = {
         new VBox {
+            spacing = 5
             children = Seq(
                 createConnectionPane(),
-                new Separator()
+                new Separator(),
+                controlPane
             )
         }
     }
@@ -212,19 +280,45 @@ object Main extends JFXApp {
         val portLabel = new Label("Port:") {
             alignmentInParent = Pos.BaselineRight
         }
-        GridPane.setConstraints(portLabel, 0, 0, 1, 1)
-
-        GridPane.setConstraints(availablePortsChoiceBox, 1, 0, 1, 1)
 
         connectButton.onAction = handle {
             onConnectHandle()
         }
-        GridPane.setConstraints(connectButton, 1, 1, 1, 1)
 
-        new GridPane {
-            hgap = 5
-            vgap = 5
-            children ++= Seq(portLabel, availablePortsChoiceBox, connectButton)
+        new HBox {
+            spacing = 5
+            children = Seq(portLabel, availablePortsChoiceBox, connectButton)
+        }
+    }
+
+    private def createControlPane(): Pane = {
+        val desiredTemperatureLabel = new Label {
+            style = "-fx-font-weight: bold"
+            text = "Desired temperature: "
+        }
+
+        val measuredTemperatureLabel = new Label {
+            style = "-fx-font-weight: bold"
+            text = "Measured temperature: "
+        }
+
+        val temperatures = new VBox {
+            spacing = 5
+            children = Seq(
+                new HBox {
+                    spacing = 5
+                    children = Seq(desiredTemperatureLabel, desiredTemperatureValueLabel)
+                },
+                new HBox {
+                    spacing = 5
+                    children = Seq(measuredTemperatureLabel, measuredTemperatureValueLabel)
+                }
+            )
+        }
+
+        new VBox {
+            spacing = 10
+            children = Seq(startStopButton, temperatures)
         }
     }
 
@@ -271,5 +365,82 @@ object Main extends JFXApp {
 
     private def onDisconnectHandle(): Unit = {
         serialPort ! SerialPort.Close()
+    }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+    sealed abstract class CommandResult(val code: Int, val expectedLength: Int) {
+        def action(bytes: Array[Byte]): Unit
+    }
+
+    case object StatsCommandResult extends CommandResult(0xC100, 16) {
+        def action(bytes: Array[Byte]): Unit = {
+            val timestamp = SerialPort.extractFloat(bytes.slice(4, 8))
+            val desiredTemperature = SerialPort.extractFloat(bytes.slice(8, 12))
+            val measuredTemperature = SerialPort.extractFloat(bytes.slice(12, 16))
+
+            lineChart.getData.get(1).getData.add(XYChart.Data[Number, Number](timestamp, desiredTemperature))
+            lineChart.getData.get(2).getData.add(XYChart.Data[Number, Number](timestamp, measuredTemperature))
+
+            desiredTemperatureValueLabel.text = f"$desiredTemperature%1.2f°C"
+            measuredTemperatureValueLabel.text = f"$measuredTemperature%1.2f°C"
+        }
+    }
+
+    val registeredCommands = List(
+        StatsCommandResult
+    ).map { command =>
+        command.code -> command
+    }.toMap
+
+    private def processData(data: ByteString): Unit = {
+        val bytes = data.toArray
+
+        val dataHex = Hex.encodeHex(bytes).grouped(2).map(_.mkString.toUpperCase).mkString(" ")
+
+        val dataAscii = new String(bytes.map { byte =>
+            if (CharUtils.isAsciiPrintable(byte.toChar)) {
+                byte
+            }
+            else {
+                '.'.toByte
+            }
+        }, StandardCharsets.UTF_8)
+
+        val dataStr = s"""($dataHex) : ($dataAscii)"""
+
+        if (bytes.length >= 4) {
+            val code = 0xFFFF & SerialPort.extractValue(bytes.slice(2, 4)).getShort
+
+            val codeStr = "0x" + Integer.toHexString(code).toUpperCase
+
+            registeredCommands.get(code) match {
+                case Some(command) => {
+                    if (bytes.length == command.expectedLength) {
+                        command.action(bytes)
+                    }
+                    else {
+                        appendTerminalText(s"""Unexpected length "${bytes.length}" for code ${codeStr}, ${command.expectedLength} bytes needed.""")
+                    }
+                }
+                case _ => {
+                    appendTerminalText(s"""Unknown code ($codeStr) received in: $dataStr.""")
+                }
+            }
+        }
+        else {
+            appendTerminalText(s"""Data received should at least contains 4 bytes: $dataStr.""")
+        }
     }
 }
