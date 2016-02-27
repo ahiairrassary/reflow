@@ -1,9 +1,12 @@
 import java.nio._
+import java.nio.charset.StandardCharsets
 
 import akka.actor._
 import akka.io.IO
 import akka.util.ByteString
 import com.github.jodersky.flow._
+import org.apache.commons.codec.binary.Hex
+import org.apache.commons.lang3.CharUtils
 
 import scala.concurrent.duration._
 
@@ -97,7 +100,7 @@ class SerialPort extends Actor {
             timeoutSchedulerOpt.foreach(_.cancel())
             timeoutSchedulerOpt = None
 
-            val expectedLength = 0xFFFF & extractValue(bytes.take(2)).getShort + 2
+            val expectedLength = (0xFFFF & extractValue(bytes.take(2)).getShort) + 2
 
             if (bytes.length >= expectedLength) {
                 val command = bytes.take(expectedLength)
@@ -107,7 +110,7 @@ class SerialPort extends Actor {
             }
             else {
                 timeoutSchedulerOpt.foreach(_.cancel())
-                timeoutSchedulerOpt = Some(system.scheduler.scheduleOnce(500.milliseconds, self, ReadTimeout))
+                timeoutSchedulerOpt = Some(system.scheduler.scheduleOnce(200.milliseconds, self, ReadTimeout))
             }
         }
         else {
@@ -123,7 +126,7 @@ object SerialPort {
     case class Close()
 
     val startCommand = SendCommand(ByteString(0x02, 0x00, 0x00, 0xB0))
-    val stopCommand = SendCommand(ByteString(0x02, 0x00, 0x01, 0xB0))
+    val stopCommand = SendCommand(ByteString(0x02, 0x00, 0x00, 0xB1))
 
     // output messages
     sealed trait OutputMessage
@@ -143,7 +146,23 @@ object SerialPort {
     def extractFloat(bytes: Array[Byte]): Float = {
         extractValue(bytes).getFloat
     }
+
     def extractValue(bytes: Array[Byte]): ByteBuffer = {
         ByteBuffer.wrap(bytes).order(ByteOrder.LITTLE_ENDIAN)
+    }
+
+    def binaryDump(bytes: Array[Byte]): String = {
+        val dataHex = Hex.encodeHex(bytes.toArray).grouped(2).map(_.mkString.toUpperCase).mkString(" ")
+
+        val dataAscii = new String(bytes.toArray.map { byte =>
+            if (CharUtils.isAsciiPrintable(byte.toChar)) {
+                byte
+            }
+            else {
+                '.'.toByte
+            }
+        }, StandardCharsets.UTF_8)
+
+        s"""($dataHex) : ($dataAscii)"""
     }
 }

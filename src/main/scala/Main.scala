@@ -1,10 +1,6 @@
-import java.nio.charset._
-
 import akka.actor.ActorSystem
 import akka.util.ByteString
 import com.github.jodersky.flow._
-import org.apache.commons.codec.binary.Hex
-import org.apache.commons.lang3.CharUtils
 import rx.lang.scala._
 import rx.lang.scala.subjects._
 import scalafx.Includes._
@@ -384,7 +380,7 @@ object Main extends JFXApp {
         def action(bytes: Array[Byte]): Unit
     }
 
-    case object StatsCommandResult extends CommandResult(0xC100, 16) {
+    case object StatsCommandResult extends CommandResult(0xD010, 16) {
         def action(bytes: Array[Byte]): Unit = {
             val timestamp = SerialPort.extractFloat(bytes.slice(4, 8))
             val desiredTemperature = SerialPort.extractFloat(bytes.slice(8, 12))
@@ -398,8 +394,50 @@ object Main extends JFXApp {
         }
     }
 
+    case object UnknownCommandResult extends CommandResult(0xFF01, 4) {
+        def action(bytes: Array[Byte]): Unit = {
+            appendTerminalText("ERROR: oven does not recognize sent data")
+        }
+    }
+
+    case object StartAckResult extends CommandResult(0xB010, 4) {
+        def action(bytes: Array[Byte]): Unit = {
+            appendTerminalText("Started")
+        }
+    }
+
+    case object StartErrResult extends CommandResult(0xB020, 4) {
+        def action(bytes: Array[Byte]): Unit = {
+            appendTerminalText("ERROR: unexpected start command")
+        }
+    }
+
+    case object StopAckResult extends CommandResult(0xB110, 4) {
+        def action(bytes: Array[Byte]): Unit = {
+            appendTerminalText("Stopped")
+        }
+    }
+
+    case object StopErrResult extends CommandResult(0xB120, 4) {
+        def action(bytes: Array[Byte]): Unit = {
+            appendTerminalText("ERROR: unexpected stop command")
+        }
+    }
+
+    case object ReflowCompleteResult extends CommandResult(0xD020, 4) {
+        def action(bytes: Array[Byte]): Unit = {
+            appendTerminalText("Reflow complete !")
+        }
+    }
+
     val registeredCommands = List(
-        StatsCommandResult
+        StatsCommandResult,
+        UnknownCommandResult,
+        StartAckResult,
+        StartErrResult,
+        StopAckResult,
+        StopErrResult,
+        ReflowCompleteResult
     ).map { command =>
         command.code -> command
     }.toMap
@@ -407,18 +445,7 @@ object Main extends JFXApp {
     private def processData(data: ByteString): Unit = {
         val bytes = data.toArray
 
-        val dataHex = Hex.encodeHex(bytes).grouped(2).map(_.mkString.toUpperCase).mkString(" ")
-
-        val dataAscii = new String(bytes.map { byte =>
-            if (CharUtils.isAsciiPrintable(byte.toChar)) {
-                byte
-            }
-            else {
-                '.'.toByte
-            }
-        }, StandardCharsets.UTF_8)
-
-        val dataStr = s"""($dataHex) : ($dataAscii)"""
+        val dataStr = SerialPort.binaryDump(bytes)
 
         if (bytes.length >= 4) {
             val code = 0xFFFF & SerialPort.extractValue(bytes.slice(2, 4)).getShort
