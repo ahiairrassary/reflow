@@ -5,8 +5,7 @@ version := "1.0"
 scalaVersion := "2.11.7"
 
 libraryDependencies ++= Seq(
-	"com.github.jodersky" %% "flow" % "2.3.0",
-	"com.github.jodersky" % "flow-native" % "2.3.0",
+    "org.scream3r" % "jssc" % "2.8.0",
 
     "org.scalafx" %% "scalafx" % "8.0.40-R8",
 

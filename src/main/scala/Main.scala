@@ -1,6 +1,6 @@
 import akka.actor.ActorSystem
 import akka.util.ByteString
-import com.github.jodersky.flow._
+import jssc.SerialPortList
 import rx.lang.scala._
 import rx.lang.scala.subjects._
 import scalafx.Includes._
@@ -16,17 +16,16 @@ import scalafx.scene.layout._
 import scalafx.scene.paint.Color._
 
 object Communication {
-    private val initialMessage = SerialPort.Information(null)
+    private val initialMessage = SerialPortActor.Information(null)
 
-    val messageFromSerial: Subject[SerialPort.OutputMessage] = SerializedSubject(BehaviorSubject(initialMessage))
+    val messageFromSerial: Subject[SerialPortActor.OutputMessage] = SerializedSubject(BehaviorSubject(initialMessage))
 }
 
 object Main extends JFXApp {
     private val system = ActorSystem()
-    private val serialPort = system.actorOf(SerialPort.props)
-    system.actorOf(SerialWatcher.props)
+    private val serialPort = system.actorOf(SerialPortActor.props)
 
-    private val availablePortsPath = ObservableBuffer.empty[String]
+    private val availablePortsPath = ObservableBuffer(SerialPortList.getPortNames: _*)
 
     // global UI widgets
     private val terminalArea = new TextArea {
@@ -61,11 +60,11 @@ object Main extends JFXApp {
         onAction = handle {
             if (text.value == "Start") {
                 cleanReceivedSeries()
-                serialPort ! SerialPort.startCommand
+                serialPort ! SerialPortActor.startCommand
                 text = "Stop"
             }
             else {
-                serialPort ! SerialPort.stopCommand
+                serialPort ! SerialPortActor.stopCommand
                 text = "Start"
             }
         }
@@ -116,7 +115,7 @@ object Main extends JFXApp {
     Communication.messageFromSerial.subscribe { message =>
         Platform.runLater {
             message match {
-                case msg: SerialPort.Information => {
+                case msg: SerialPortActor.Information => {
                     if (msg.message == null) {
                         // do nothing
                     }
@@ -124,10 +123,10 @@ object Main extends JFXApp {
                         appendTerminalText(msg.message)
                     }
                 }
-                case msg: SerialPort.Error => {
+                case msg: SerialPortActor.Error => {
                     appendTerminalText(msg.message)
                 }
-                case msg: SerialPort.ConnectionClosed => {
+                case msg: SerialPortActor.ConnectionClosed => {
                     appendTerminalText(msg.message)
 
                     startStopButton.text = "Start"
@@ -148,7 +147,7 @@ object Main extends JFXApp {
 
                     cleanReceivedSeries()
                 }
-                case msg: SerialPort.ConnectionSuccess => {
+                case msg: SerialPortActor.ConnectionSuccess => {
                     appendTerminalText("Successfully connected")
 
                     commandInput.disable = false
@@ -161,18 +160,8 @@ object Main extends JFXApp {
 
                     controlPane.disable = false
                 }
-                case msg: SerialPort.DataReceived => {
+                case msg: SerialPortActor.DataReceived => {
                     processData(msg.data)
-                }
-                case msg: SerialPort.NewSerialPort => {
-                    availablePortsPath.clear()
-                    (availablePortsPath ++ Some(msg.path)).distinct.sorted.foreach { path =>
-                        availablePortsPath += path
-                    }
-
-                    if (availablePortsPath.length == 1) {
-                        availablePortsChoiceBox.selectionModel.value.selectLast()
-                    }
                 }
             }
         }
@@ -355,12 +344,11 @@ object Main extends JFXApp {
         connectButton.disable = true
         connectButton.text = "Connecting..."
 
-        val settings = SerialSettings(115200, 8, twoStopBits = false, Parity.None)
-        serialPort ! SerialPort.Open(availablePortsChoiceBox.getSelectionModel.getSelectedItem, settings)
+        serialPort ! SerialPortActor.Open(availablePortsChoiceBox.getSelectionModel.getSelectedItem)
     }
 
     private def onDisconnectHandle(): Unit = {
-        serialPort ! SerialPort.Close()
+        serialPort ! SerialPortActor.Close()
     }
 
 
@@ -382,9 +370,9 @@ object Main extends JFXApp {
 
     case object StatsCommandResult extends CommandResult(0xD010, 16) {
         def action(bytes: Array[Byte]): Unit = {
-            val timestamp = SerialPort.extractFloat(bytes.slice(4, 8))
-            val desiredTemperature = SerialPort.extractFloat(bytes.slice(8, 12))
-            val measuredTemperature = SerialPort.extractFloat(bytes.slice(12, 16))
+            val timestamp = SerialPortActor.extractFloat(bytes.slice(4, 8))
+            val desiredTemperature = SerialPortActor.extractFloat(bytes.slice(8, 12))
+            val measuredTemperature = SerialPortActor.extractFloat(bytes.slice(12, 16))
 
             lineChart.getData.get(1).getData.add(XYChart.Data[Number, Number](timestamp, desiredTemperature))
             lineChart.getData.get(2).getData.add(XYChart.Data[Number, Number](timestamp, measuredTemperature))
@@ -445,10 +433,10 @@ object Main extends JFXApp {
     private def processData(data: ByteString): Unit = {
         val bytes = data.toArray
 
-        val dataStr = SerialPort.binaryDump(bytes)
+        val dataStr = SerialPortActor.binaryDump(bytes)
 
         if (bytes.length >= 4) {
-            val code = 0xFFFF & SerialPort.extractValue(bytes.slice(2, 4)).getShort
+            val code = 0xFFFF & SerialPortActor.extractValue(bytes.slice(2, 4)).getShort
 
             val codeStr = "0x" + Integer.toHexString(code).toUpperCase
 
