@@ -102,7 +102,7 @@ class SerialPortActor extends Actor with SerialPortEventListener{
                 .putShort(msg.command.length.toShort)
                 .array()
 
-            val withLength = ByteString(lengthBuffer) ++ msg.command.reverse
+            val withLength = ByteString(lengthBuffer) ++ msg.command
 
             Try {
                 port.writeBytes(withLength.toArray)
@@ -168,8 +168,8 @@ object SerialPortActor {
     case class SendCommand(command: ByteString)
     case class Close()
 
-    val startCommand = SendCommand(ByteString(0xB0, 0x00))
-    val stopCommand = SendCommand(ByteString(0xB1, 0x00))
+    val startCommand = SendCommand(ByteString(0x00, 0xB0))
+    val stopCommand = SendCommand(ByteString(0x00, 0xB1))
 
     // output messages
     sealed trait OutputMessage

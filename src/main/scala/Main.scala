@@ -1,4 +1,4 @@
-import javafx.beans.value.{ObservableValue, ChangeListener}
+import java.nio.{ByteOrder, ByteBuffer}
 
 import akka.actor.ActorSystem
 import akka.util.ByteString
@@ -10,7 +10,7 @@ import scalafx.application.JFXApp.PrimaryStage
 import scalafx.application._
 import scalafx.collections.ObservableBuffer
 import scalafx.geometry._
-import scalafx.scene.{Node, Scene}
+import scalafx.scene._
 import scalafx.scene.control._
 import scalafx.scene.chart._
 import scalafx.scene.input._
@@ -61,6 +61,16 @@ object Main extends JFXApp {
         text = "Start"
         onAction = handle {
             if (text.value == "Start") {
+                val floatByteArray = ByteBuffer.allocate(4*3)
+                    .order(ByteOrder.LITTLE_ENDIAN)
+                    .putFloat(pSpinner.value.value.toFloat)
+                    .putFloat(iSpinner.value.value.toFloat)
+                    .putFloat(dSpinner.value.value.toFloat)
+                    .array()
+
+                val pidCommand = ByteString(0x00, 0xC0) ++ floatByteArray
+
+                serialPort ! SerialPortActor.SendCommand(pidCommand)
                 cleanReceivedSeries()
                 serialPort ! SerialPortActor.startCommand
                 text = "Stop"
@@ -86,6 +96,10 @@ object Main extends JFXApp {
     private val measuredTemperatureValueLabel = new Label {
         text = "-"
     }
+
+    private val (pLabelSpinner, pSpinner) = createPidSpinBox("P", 0, 0)
+    private val (iLabelSpinner, iSpinner) = createPidSpinBox("I", 0, 1)
+    private val (dLabelSpinner, dSpinner) = createPidSpinBox("D", 0, 2)
 
     private val controlPane = createControlPane()
     controlPane.disable = true
@@ -305,47 +319,33 @@ object Main extends JFXApp {
             )
         }
 
-        val pidSpinners = Seq(
-            ("P", 10),
-            ("I", 20),
-            ("D", 30)
-        ).zipWithIndex.flatMap { case ((name, initialValue), index) =>
-            createPidSpinBox(name, initialValue, index)
-        }
-
-        val pidValues = new GridPane {
+        val pidPane = new GridPane {
             hgap = 5
             vgap = 5
             alignmentInParent = Pos.BaselineRight
-            children = pidSpinners
+            children = Seq(pLabelSpinner, pSpinner, iLabelSpinner, iSpinner, dLabelSpinner, dSpinner)
         }
 
         new VBox {
             spacing = 10
-            children = Seq(startStopButton, temperatures, pidValues)
+            children = Seq(startStopButton, temperatures, pidPane)
         }
     }
 
-    private def createPidSpinBox(name: String, initialValue: Float, rowIndex: Int): Seq[Node] = {
+    private def createPidSpinBox(name: String, initialValue: Float, rowIndex: Int): (Label, Spinner[Double]) = {
         val label = new Label {
             style = "-fx-font-weight: bold"
             text = s"$name: "
         }
 
-        val spinBox = new Spinner[Double](0, 10000, initialValue) {
-            value.addListener(new ChangeListener[Double] {
-                def changed(observable: ObservableValue[_ <: Double], oldValue: Double, newValue: Double): Unit = {
-                    // TODO
-                    println(s"""new value $name $newValue""")
-                    //serialPort ! SerialPortActor.SendCommand("")
-                }
-            })
+        val spinBox = new Spinner[Double](0, 100000, initialValue) {
+            editable = true
         }
 
         GridPane.setConstraints(label, 0, rowIndex, 1, 1)
         GridPane.setConstraints(spinBox, 1, rowIndex, 1, 1)
 
-        Seq(label, spinBox)
+        (label, spinBox)
     }
 
     private def createBottomPane(): Pane = {
@@ -444,7 +444,7 @@ object Main extends JFXApp {
 
     case object StartErrResult extends CommandResult(0xB020, 4) {
         def action(bytes: Array[Byte]): Unit = {
-            appendTerminalText("ERROR: unexpected start command")
+            appendTerminalText("ERROR: unexpected command [waiting for a start command]")
         }
     }
 
@@ -456,12 +456,20 @@ object Main extends JFXApp {
 
     case object StopErrResult extends CommandResult(0xB120, 4) {
         def action(bytes: Array[Byte]): Unit = {
-            appendTerminalText("ERROR: unexpected stop command")
+            appendTerminalText("ERROR: unexpected stop command [waiting for a stop command]")
+        }
+    }
+
+    case object SetAckResult extends CommandResult(0xC010, 4) {
+        def action(bytes: Array[Byte]): Unit = {
+            appendTerminalText("Set value ACK received")
         }
     }
 
     case object ReflowCompleteResult extends CommandResult(0xD020, 4) {
         def action(bytes: Array[Byte]): Unit = {
+            startStopButton.text = "Start"
+
             appendTerminalText("Reflow complete !")
         }
     }
@@ -473,6 +481,7 @@ object Main extends JFXApp {
         StartErrResult,
         StopAckResult,
         StopErrResult,
+        SetAckResult,
         ReflowCompleteResult
     ).map { command =>
         command.code -> command
