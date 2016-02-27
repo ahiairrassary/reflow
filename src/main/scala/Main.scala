@@ -1,6 +1,8 @@
+import javafx.beans.value.{ObservableValue, ChangeListener}
+
 import akka.actor.ActorSystem
 import akka.util.ByteString
-import jssc.SerialPortList
+import jssc._
 import rx.lang.scala._
 import rx.lang.scala.subjects._
 import scalafx.Includes._
@@ -50,7 +52,7 @@ object Main extends JFXApp {
     }
 
     private val connectButton = new Button {
-        alignmentInParent = Pos.BaselineLeft
+        alignmentInParent = Pos.BaselineRight
         text = "Connect"
     }
     connectButton.requestFocus()
@@ -71,6 +73,7 @@ object Main extends JFXApp {
     }
 
     private val availablePortsChoiceBox = new ChoiceBox[String] {
+        prefWidth = Integer.MAX_VALUE
         maxWidth = 200
         alignmentInParent = Pos.BaselineRight
         items = availablePortsPath
@@ -271,6 +274,7 @@ object Main extends JFXApp {
         }
 
         new HBox {
+            minWidth = 300
             spacing = 5
             children = Seq(portLabel, availablePortsChoiceBox, connectButton)
         }
@@ -301,9 +305,40 @@ object Main extends JFXApp {
             )
         }
 
+        val pidValues = new VBox {
+            spacing = 5
+            children = Seq(
+                createPidSpinBox("P", 10),
+                createPidSpinBox("I", 20),
+                createPidSpinBox("D", 30)
+            )
+        }
+
         new VBox {
             spacing = 10
-            children = Seq(startStopButton, temperatures)
+            children = Seq(startStopButton, temperatures, pidValues)
+        }
+    }
+
+    private def createPidSpinBox(name: String, initialValue: Float): HBox = {
+        val label = new Label {
+            style = "-fx-font-weight: bold"
+            text = s"$name: "
+        }
+
+        val spinBox = new Spinner[Double](0, 10000, initialValue) {
+            value.addListener(new ChangeListener[Double] {
+                def changed(observable: ObservableValue[_ <: Double], oldValue: Double, newValue: Double): Unit = {
+                    // TODO
+                    println(s"""new value $name $newValue""")
+                    //serialPort ! SerialPortActor.SendCommand("")
+                }
+            })
+        }
+
+        new HBox {
+            spacing = 5
+            children = Seq(label, spinBox)
         }
     }
 

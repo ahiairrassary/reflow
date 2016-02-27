@@ -75,7 +75,6 @@ class SerialPortActor extends Actor with SerialPortEventListener{
                 port.readBytes(event.getEventValue)
             } match {
                 case Success(newBytes) => {
-                    println(binaryDump(newBytes))
                     handleData(newBytes)
                 }
                 case Failure(throwable) => {
@@ -98,7 +97,25 @@ class SerialPortActor extends Actor with SerialPortEventListener{
             context.become(waitForOpen)
         }
         case msg: SendCommand => {
-            port.writeBytes(msg.command.toArray)
+            val lengthBuffer = ByteBuffer.allocate(2)
+                .order(ByteOrder.LITTLE_ENDIAN)
+                .putShort(msg.command.length.toShort)
+                .array()
+
+            val withLength = ByteString(lengthBuffer) ++ msg.command.reverse
+
+            Try {
+                port.writeBytes(withLength.toArray)
+            } match {
+                case Failure(throwable) => {
+                    val message = s"""ERROR: during writing: ${throwable.getMessage}"""
+                    Communication.messageFromSerial.onNext(Error(message))
+                }
+                case _ => {
+                    // do nothing
+                }
+            }
+
         }
         case ReadTimeout => {
             timeoutSchedulerOpt.foreach(_.cancel())
@@ -151,8 +168,8 @@ object SerialPortActor {
     case class SendCommand(command: ByteString)
     case class Close()
 
-    val startCommand = SendCommand(ByteString(0x02, 0x00, 0x00, 0xB0))
-    val stopCommand = SendCommand(ByteString(0x02, 0x00, 0x00, 0xB1))
+    val startCommand = SendCommand(ByteString(0xB0, 0x00))
+    val stopCommand = SendCommand(ByteString(0xB1, 0x00))
 
     // output messages
     sealed trait OutputMessage
